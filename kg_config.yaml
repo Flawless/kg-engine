@@ -1,0 +1,41 @@
+# KG Engine Configuration
+# Knowledge Graph semantic search and indexing configuration
+
+# Embedding model for semantic search
+# Options: all-MiniLM-L6-v2, all-mpnet-base-v2, etc.
+embedding_model: all-MiniLM-L6-v2
+
+# Search scoring weights (must sum to 1.0)
+search_weights:
+  semantic: 0.55       # Semantic similarity from embeddings
+  connectivity: 0.05   # How connected the node is in the graph
+  title: 0.20         # Fuzzy match in title
+  tag: 0.20           # Fuzzy match in tags
+  content: 0.0        # Match in content (set >0 to enable content search)
+
+# Connectivity scoring parameters
+connectivity:
+  max_depth: 2        # Maximum recursion depth for connectivity scoring
+  decay_factor: 0.5   # Score decay per level (0.5 = half strength each hop)
+  
+  # Link type weights for connectivity scoring
+  link_weights:
+    node: 1.0         # Direct node references
+    task: 0.8         # Task links (slightly less weight)
+    project: 0.6      # Project links
+    sprint: 0.4       # Sprint links (temporal, less structural)
+
+# Fuzzy matching parameters
+fuzzy_matching:
+  threshold: 0.6      # Minimum similarity for fuzzy matches
+  partial_threshold: 0.7  # Threshold for partial word matches
+
+# Database paths
+paths:
+  kg_path: .          # Path to knowledge graph (nodes directory)
+  db_path: .claude/lancedb  # Path to LanceDB storage
+
+# Index settings
+index:
+  batch_size: 100     # Number of nodes to process in each batch
+  max_content_length: 5000  # Maximum content length to index (chars)

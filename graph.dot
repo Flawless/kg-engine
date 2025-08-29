@@ -1,0 +1,15 @@
+digraph KnowledgeGraph {
+  rankdir=LR;
+  node [shape=box, style=rounded];
+  "sprint-2024-01-01" [label="sprint-2024-01-01\nSprint Planning...", fillcolor=lightblue, style=filled];
+  "daily-2024-01-01" [label="daily-2024-01-01\nDaily Notes...", fillcolor=lightblue, style=filled];
+  "node-1" [label="node-1\nTest Node 1...", fillcolor=lightblue, style=filled];
+  "node-2" [label="node-2\nAPI Design...", fillcolor=lightblue, style=filled];
+  "node-3" [label="node-3\nVector Database...", fillcolor=lightblue, style=filled];
+  "daily-2024-01-01" -> "node-1";
+  "daily-2024-01-01" -> "sprint:2024-01-01";
+  "node-1" -> "node-2";
+  "node-1" -> "project:test-project";
+  "node-2" -> "node-3";
+  "node-3" -> "node-1";
+}
