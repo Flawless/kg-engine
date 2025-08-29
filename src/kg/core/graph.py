@@ -23,8 +23,8 @@ if env_file.exists():
 
 
 class GraphTraverser:
-    def __init__(self, kg_path: str = "."):
-        self.kg_path = Path(kg_path)
+    def __init__(self, kg_path: str = None):
+        self.kg_path = Path(kg_path) if kg_path else Path.cwd()
         self.nodes = {}  # id -> node data
         self.edges = defaultdict(set)  # source -> set of targets
         self.reverse_edges = defaultdict(set)  # target -> set of sources
@@ -256,7 +256,7 @@ def print_traversal_tree(traversal: Dict[int, List[str]], nodes: Dict[str, Dict]
                 print(f"{indent}{'└─' if depth > 0 else ''} {node_id}")
 
 
-def main():
+def main(kg_path=None):
     parser = argparse.ArgumentParser(description="Knowledge Graph Traversal")
     parser.add_argument("--traverse", help="Traverse from node ID")
     parser.add_argument("--depth", type=int, default=3, help="Max traversal depth")
@@ -277,7 +277,7 @@ def main():
     parser.add_argument("--stats", action="store_true", help="Show graph statistics")
 
     args = parser.parse_args()
-    traverser = GraphTraverser()
+    traverser = GraphTraverser(kg_path)
 
     if args.traverse:
         print(

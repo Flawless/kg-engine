@@ -6,8 +6,14 @@ Maintains a LanceDB index with both full-text and semantic search capabilities.
 """
 
 import os
+
+# Suppress transformers/torch verbosity before importing
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import yaml
 import argparse
+import logging
 import pandas as pd
 import difflib
 import re
@@ -19,6 +25,9 @@ from sentence_transformers import SentenceTransformer
 import lancedb
 from nltk.stem import PorterStemmer
 import nltk
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 
@@ -34,17 +43,20 @@ if env_file.exists():
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load configuration from YAML file."""
     if config_path is None:
-        # Look for config in standard locations
-        for path in ["kg_config.yaml", "../kg_config.yaml", "../../kg_config.yaml"]:
-            if Path(path).exists():
-                config_path = path
-                break
+        # Look for config in current working directory
+        if Path("kg_config.yaml").exists():
+            config_path = "kg_config.yaml"
+            logger.debug(f"Found config file: {config_path}")
+        else:
+            logger.debug("No config file found, using defaults")
 
     if config_path and Path(config_path).exists():
+        logger.debug(f"Loading config from: {Path(config_path).resolve()}")
         with open(config_path, "r") as f:
             return yaml.safe_load(f)
 
     # Return default config if no file found
+    logger.debug("Using default configuration")
     return {
         "embedding_model": "all-MiniLM-L6-v2",
         "search_weights": {
@@ -102,9 +114,31 @@ class GraphIndexer:
         # Load configuration
         config = load_config(config_path)
 
+        # Debug logging
+        logger.debug(f"Config path: {config_path}")
+        logger.debug(f"Config kg_path: {config['paths']['kg_path']}")
+        logger.debug(f"Config db_path: {config['paths']['db_path']}")
+        logger.debug(f"Provided kg_path: {kg_path}")
+        logger.debug(f"Current working directory: {os.getcwd()}")
+
         # Use provided values or fall back to config
         self.kg_path = Path(kg_path or config["paths"]["kg_path"])
-        self.db_path = Path(db_path or config["paths"]["db_path"])
+
+        # If db_path is provided, use it; otherwise construct from config relative to kg_path
+        if db_path:
+            self.db_path = Path(db_path)
+        else:
+            # Make db_path relative to kg_path, not current directory
+            db_path_config = config["paths"]["db_path"]
+            if Path(db_path_config).is_absolute():
+                self.db_path = Path(db_path_config)
+            else:
+                self.db_path = self.kg_path / db_path_config
+
+        # Debug logging
+        logger.debug(f"Resolved kg_path: {self.kg_path.resolve()}")
+        logger.debug(f"Resolved db_path: {self.db_path.resolve()}")
+
         self.db_path.mkdir(parents=True, exist_ok=True)
 
         # Set weights with validation
@@ -125,9 +159,11 @@ class GraphIndexer:
         if model_name is None:
             model_name = os.environ.get("EMBEDDING_MODEL", config["embedding_model"])
 
-        # Initialize embedding model
-        print(f"Loading embedding model: {model_name}")
-        self.model = SentenceTransformer(model_name)
+        # Initialize embedding model silently
+        logger.debug(f"Loading embedding model: {model_name}")
+        self.model = SentenceTransformer(
+            model_name, device="cpu" if os.environ.get("NO_GPU") else None
+        )
 
         # Connect to LanceDB
         self.db = lancedb.connect(str(self.db_path))
@@ -166,7 +202,7 @@ class GraphIndexer:
         if "nodes" not in existing_tables:
             # Create empty table with schema
             # Ensure both vector columns have the same embedding size
-            dummy_embedding = self.model.encode("dummy")
+            dummy_embedding = self.model.encode("dummy", show_progress_bar=False)
             schema_data = [
                 {
                     "id": "dummy",
@@ -212,7 +248,7 @@ class GraphIndexer:
             frontmatter = yaml.safe_load(yaml_content) or {}
             return frontmatter, title, body
         except yaml.YAMLError as e:
-            print(f"YAML parse error: {e}")
+            logger.warning(f"YAML parse error: {e}")
             return {}, "", content
 
     def index_file(self, file_path: Path):
@@ -226,7 +262,7 @@ class GraphIndexer:
         frontmatter, title, body = self.extract_frontmatter(content)
 
         if "id" not in frontmatter:
-            print(f"Warning: {file_path} missing id field")
+            logger.warning(f"Warning: {file_path} missing id field")
             return
 
         node_id = frontmatter["id"]
@@ -237,11 +273,11 @@ class GraphIndexer:
         # Create embeddings
         # Content embedding: title + body
         content_text = f"{title}\n{body}"
-        content_embedding = self.model.encode(content_text)
+        content_embedding = self.model.encode(content_text, show_progress_bar=False)
 
         # Tag embedding: tags + title (tags are more important)
         tag_text = f"{' '.join(tags)} {title}" if tags else title
-        tag_embedding = self.model.encode(tag_text)
+        tag_embedding = self.model.encode(tag_text, show_progress_bar=False)
 
         # Get file modification time
         last_modified = datetime.fromtimestamp(file_path.stat().st_mtime)
@@ -272,11 +308,11 @@ class GraphIndexer:
 
         # Insert new data
         self.nodes_table.add([node_data])
-        print(f"Indexed: {file_path.name}")
+        logger.debug(f"Indexed: {file_path.name}")
 
     def rebuild_index(self):
         """Rebuild entire index from scratch."""
-        print("Rebuilding entire index...")
+        logger.info("Rebuilding entire index...")
 
         # Recreate table
         self.db.drop_table("nodes")
@@ -286,12 +322,12 @@ class GraphIndexer:
         nodes_dir = self.kg_path / "nodes"
         if nodes_dir.exists():
             md_files = list(nodes_dir.glob("*.md"))
-            print(f"Found {len(md_files)} markdown files")
+            logger.info(f"Found {len(md_files)} markdown files")
 
             for file_path in md_files:
                 self.index_file(file_path)
 
-        print(f"Index rebuilt: {self.get_stats()}")
+        logger.info(f"Index rebuilt: {self.get_stats()}")
 
     def get_stats(self) -> Dict[str, Any]:
         """Get index statistics."""
@@ -508,7 +544,7 @@ class GraphIndexer:
         # Get embeddings for each normalized tag
         tag_scores = []
         for tag in normalized_tags:
-            tag_embedding = self.model.encode(tag)
+            tag_embedding = self.model.encode(tag, show_progress_bar=False)
             # Calculate cosine similarity manually
             # Normalize embeddings first
             query_norm = query_embedding / np.linalg.norm(query_embedding)
@@ -532,7 +568,7 @@ class GraphIndexer:
             include_content: If True, also search in content (default: tags only)
         """
         query_lower = query.lower()
-        query_embedding = self.model.encode(query)
+        query_embedding = self.model.encode(query, show_progress_bar=False)
 
         # Get all nodes for graph analysis
         all_nodes_df = self.nodes_table.to_pandas()
@@ -777,7 +813,15 @@ class GraphIndexer:
         return orphans
 
 
-def main():
+def main(kg_path=None, config_path=None):
+    # If kg_path not provided, check environment variable
+    if kg_path is None:
+        kg_path = os.environ.get("KG_PATH")
+
+    # If config_path not provided, check environment variable
+    if config_path is None:
+        config_path = os.environ.get("KG_CONFIG")
+
     parser = argparse.ArgumentParser(description="Knowledge Graph LanceDB Indexer")
     parser.add_argument("--rebuild", action="store_true", help="Rebuild entire index")
     parser.add_argument("--update", help="Update index for specific file")
@@ -894,6 +938,8 @@ def main():
 
     try:
         indexer = GraphIndexer(
+            kg_path=kg_path,
+            config_path=config_path,
             weights=weights,
             connectivity_depth=args.connectivity_depth,
             decay_factor=args.decay_factor,
@@ -1040,13 +1086,15 @@ def main():
             print("Use 'make tags' to see available tags.")
         else:
             # Calculate semantic similarity between the query tag and all other tags
-            query_embedding = indexer.model.encode(args.similar_tags)
+            query_embedding = indexer.model.encode(
+                args.similar_tags, show_progress_bar=False
+            )
             query_norm = query_embedding / np.linalg.norm(query_embedding)
 
             tag_similarities = []
             for tag in all_tags:
                 if tag != args.similar_tags:  # Exclude the query tag itself
-                    tag_embedding = indexer.model.encode(tag)
+                    tag_embedding = indexer.model.encode(tag, show_progress_bar=False)
                     tag_norm = tag_embedding / np.linalg.norm(tag_embedding)
                     similarity = float(query_norm @ tag_norm)
 

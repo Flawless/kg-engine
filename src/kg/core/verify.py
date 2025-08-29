@@ -191,9 +191,11 @@ class GraphVerifier:
             print(f"❌ Found {len(self.errors)} errors that need to be fixed")
 
 
-def main():
+def main(kg_path=None):
     """Main entry point."""
-    kg_path = os.path.dirname(os.path.abspath(__file__))
+    if kg_path is None:
+        # Default to current working directory
+        kg_path = os.getcwd()
     verifier = GraphVerifier(kg_path)
     success = verifier.verify()
     exit(0 if success else 1)
